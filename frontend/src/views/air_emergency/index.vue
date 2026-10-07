@@ -38,33 +38,37 @@
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
           <th>当前状态</th>
+          <th>审计标记</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
-          <td>{{ row.status }}</td>
+          <td>
+            {{ row.status }}
+            <span v-if="row.abnormal" class="audit-badge" title="该记录命中过撤销/作废等反向操作">异常</span>
+          </td>
+          <td>
+            <span :class="['audit-flag', row.pending ? 'is-pending' : 'is-done']">
+              {{ row.pending ? '未解除' : '已办结' }}
+            </span>
+          </td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-for="action in actionsFor(row)" :key="action">
+              <button class="link" type="button" @click="runAction(action, row)">{{ action }}</button>
+            </template>
+            <span v-if="!actionsFor(row).length" class="muted-text">—</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无应急保障数据，可先登记应急保障</td>
+          <td :colspan="columns.length + 3" class="empty-state">暂无应急保障数据，可先登记应急保障</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条应急保障记录</span>
+      <span>共 {{ total }} 条应急保障记录，处置中/响应中均属于未解除，只有「已解除」才办结</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -74,6 +78,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  availableActions,
   downloadEntries,
   listEntries,
   moduleMeta,
@@ -81,23 +86,38 @@ import {
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
+// 字段、状态、动作、指标全部取模块元数据，页面不再各写一份，避免和状态链脱节。
 const meta = moduleMeta('air_emergency')
-const columns = ["应急编号", "事件类型", "涉及航班", "事发位置", "响应等级", "响应人员", "处置措施", "应急状态"]
-const actions = ["启动响应", "落实处置", "解除应急"]
-const statuses = ["待响应", "响应中", "处置中", "已解除"]
-const stats = [{"label": "待响应事件", "value": 0}, {"label": "处置中事件", "value": 0}, {"label": "已解除事件", "value": 0}]
+const columns = meta.fields
+const filterFields = meta.fields.slice(0, 3)
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+
 const statusSummary = computed(() =>
-  statuses.map((status: string) => ({
+  meta.statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+// 指标卡与状态链对应：待响应事件→待响应；处置中事件→响应中+处置中（都还没解除）；
+// 已解除事件→已解除。未解除的记录绝不计入已解除（已完成）。
+function countByStatus(status: string): number {
+  return rows.value.filter((row) => String(row.status) === status).length
+}
+
+const stats = computed(() => [
+  { label: '待响应事件', value: countByStatus('待响应') },
+  { label: '处置中事件', value: countByStatus('响应中') + countByStatus('处置中') },
+  { label: '已解除事件', value: countByStatus('已解除') },
+])
+
+function actionsFor(row: EntryRow): string[] {
+  return availableActions(meta, row)
+}
 
 function resetFilters() {
   filters.value = {}

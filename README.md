@@ -68,4 +68,14 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
-- 想回到初始数据：清掉浏览器里 `airport-ground-handling:entries` 这一项，或调用 `resetModule(模块)`。
+- 审计标记（`pending` 待处理/未办结、`abnormal` 异常）口径集中在
+  `frontend/src/data/audit.ts`，各业务页与运营概览共用同一套标记。
+- 本地数据带版本化兼容迁移（缺字段补位、重复样例去重、落盘失败断点续迁），逻辑见
+  `frontend/src/data/local-store.ts`，可用 `npm run verify:data` 跑 33 项断言核对。
+- 想回到初始数据：清掉浏览器里 `airport-ground-handling:entries` 这一项（迁移断点
+  `…:entries:schema`、损坏备份 `…:entries:corrupt-backup` 一并清掉），或调用 `resetModule(模块)`。
+
+## 链路核对
+
+应急保障（应急编号 → 事件类型 → 响应等级 → 处置措施）的运行路径、构建/部署/本地数据加载流程图，
+以及兼容迁移与审计标记口径，见 [`docs/应急保障链路核对.md`](docs/应急保障链路核对.md)。

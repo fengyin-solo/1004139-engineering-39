@@ -1,9 +1,7 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { isNegativeAction, isPending } from '@/data/audit'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
-
-// 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
-const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
 
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
@@ -28,27 +26,62 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
-export function runAction(key: string, id: number, action: string): ActionResult {
-  const meta = moduleMeta(key)
+// 链路核对：动作能不能在当前状态上执行。
+// - 终态（如应急的「已解除」）不再放行任何动作，不能把办结记录又改回去；
+// - 正向动作只能落在状态链的相邻环节，不允许跳步；
+// - 「往回走」类动作（撤销/作废/驳回等）不走正向链，任何非终态都可执行并打异常标记。
+export function checkAction(meta: ModuleMeta, row: EntryRow, action: string): ActionResult {
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
   }
+  const statuses = meta.statuses
+  const current = String(row.status)
+  if (current === target) {
+    return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
+  }
+  const lastStatus = statuses[statuses.length - 1]
+  if (current === lastStatus) {
+    return { ok: false, message: `${meta.entity}已是终态「${lastStatus}」，不能再执行「${action}」` }
+  }
+  if (!isNegativeAction(action)) {
+    const currentIndex = statuses.indexOf(current)
+    const targetIndex = statuses.indexOf(target)
+    if (currentIndex < 0) {
+      return { ok: false, message: `${meta.entity}当前状态「${current}」不在登记的状态链里，无法流转` }
+    }
+    if (targetIndex !== currentIndex + 1) {
+      return { ok: false, message: `${meta.entity}需要按顺序流转，当前「${current}」不能直接跳到「${target}」` }
+    }
+  }
+  return { ok: true, message: '' }
+}
+
+// 当前状态下真正可执行的动作，供页面只渲染合规按钮（页面本身不做业务判断）。
+export function availableActions(meta: ModuleMeta, row: EntryRow): string[] {
+  return meta.actions.filter((action) => checkAction(meta, row, action).ok)
+}
+
+export function runAction(key: string, id: number, action: string): ActionResult {
+  const meta = moduleMeta(key)
   const rows = listRows(key)
   const index = rows.findIndex((row) => Number(row.id) === id)
   if (index < 0) {
     return { ok: false, message: `没有找到编号为 ${id} 的${meta.entity}` }
   }
-  const current = String(rows[index].status)
-  if (current === target) {
-    return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
+  const guard = checkAction(meta, rows[index], action)
+  if (!guard.ok) {
+    return guard
   }
+  const target = meta.actionTargets[action] as string
   const lastStatus = meta.statuses[meta.statuses.length - 1]
+  // 审计标记用统一口径：pending 看是否终态；abnormal 一旦命中过反向动作就保留。
+  const negative = isNegativeAction(action)
   const updated: EntryRow = {
     ...rows[index],
     status: target,
-    pending: target !== lastStatus,
-    abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
+    pending: isPending(meta, target),
+    abnormal: negative || rows[index].abnormal === true,
   }
   const next = [...rows]
   next[index] = updated
@@ -68,7 +101,7 @@ export function exportEntries(key: string): { filename: string; content: string 
   for (const row of listRows(key)) {
     lines.push([row.id, ...meta.fields.map((field) => row[field] ?? ''), row.status].join(','))
   }
-  return { filename: `${meta.name}-清单.csv`, content: `\uFEFF${lines.join('\n')}` }
+  return { filename: `${meta.name}-清单.csv`, content: `﻿${lines.join('\n')}` }
 }
 
 export function downloadEntries(key: string): void {
@@ -91,8 +124,9 @@ export function loadOverview(): OverviewResult {
     return {
       name: meta.name,
       created: entries.length,
-      pending: entries.filter((row) => row.pending).length,
-      abnormal: entries.filter((row) => row.abnormal).length,
+      // 与各业务页共用同一套审计标记：pending/abnormal 由数据层统一迁移与维护。
+      pending: entries.filter((row) => row.pending === true).length,
+      abnormal: entries.filter((row) => row.abnormal === true).length,
     }
   })
   const cards = [

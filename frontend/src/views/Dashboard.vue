@@ -17,19 +17,30 @@
     </div>
     <table class="data-table">
       <thead>
-        <tr><th>业务模块</th><th>今日新增</th><th>待处理</th><th>异常量</th></tr>
+        <tr>
+          <th>业务模块</th>
+          <th>今日新增</th>
+          <th>待处理<span class="col-hint">（未办结）</span></th>
+          <th>异常量<span class="col-hint">（审计标记）</span></th>
+        </tr>
       </thead>
       <tbody>
         <tr v-for="row in moduleRows" :key="row.name">
           <td>{{ row.name }}</td>
           <td>{{ row.created }}</td>
           <td>{{ row.pending }}</td>
-          <td>{{ row.abnormal }}</td>
+          <td>
+            {{ row.abnormal }}
+            <span v-if="row.abnormal > 0" class="audit-badge">异常</span>
+          </td>
         </tr>
       </tbody>
     </table>
     <footer class="page-foot">
-      <span>数据保存在本机浏览器里，换浏览器或清缓存会回到示例数据</span>
+      <span>
+        数据保存在本机浏览器里，换浏览器或清缓存会回到示例数据；
+        「待处理/异常量」与各业务页共用同一套审计标记，未到终态（如应急未解除）不计办结
+      </span>
     </footer>
   </section>
 </template>

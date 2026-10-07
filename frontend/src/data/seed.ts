@@ -782,7 +782,7 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
     {
       "id": 3,
       "status": "处置中",
-      "pending": false,
+      "pending": true,
       "abnormal": false,
       "应急编号": "AIR_-0003",
       "事件类型": "应急保障样例3",
