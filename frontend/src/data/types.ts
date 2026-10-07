@@ -34,5 +34,12 @@ export type ActionResult = {
 
 export type OverviewResult = {
   cards: { label: string; value: number }[]
-  modules: { name: string; created: number; pending: number; abnormal: number }[]
+  modules: {
+    name: string
+    created: number
+    pending: number
+    abnormal: number
+    // 与业务页面共用的审计标记：abnormal 有异常；pending 仍未闭环；done 已闭环
+    mark: 'pending' | 'abnormal' | 'done'
+  }[]
 }

@@ -1,3 +1,4 @@
+import { canRunAction, isAbnormalRow, isPendingRow } from '@/data/audit'
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
@@ -39,15 +40,21 @@ export function runAction(key: string, id: number, action: string): ActionResult
   if (index < 0) {
     return { ok: false, message: `没有找到编号为 ${id} 的${meta.entity}` }
   }
-  const current = String(rows[index].status)
-  if (current === target) {
+  const current = rows[index]
+  if (String(current.status) === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
-  const lastStatus = meta.statuses[meta.statuses.length - 1]
+  // 链路核对：只允许按登记的状态顺序向前走一步，回退/跨级/重复上线都拒绝。
+  if (!canRunAction(meta, current, target)) {
+    return {
+      ok: false,
+      message: `${meta.entity}当前为「${current.status}」，不能直接${action}到「${target}」，请按顺序处置`,
+    }
+  }
   const updated: EntryRow = {
-    ...rows[index],
+    ...current,
     status: target,
-    pending: target !== lastStatus,
+    pending: isPendingRow(meta, { status: target }),
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
   }
   const next = [...rows]
@@ -88,12 +95,17 @@ export function loadOverview(): OverviewResult {
   const rows = allRows()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
     const entries = rows[meta.key] ?? []
+    const pending = entries.filter((row) => isPendingRow(meta, row)).length
+    const abnormal = entries.filter((row) => isAbnormalRow(row)).length
     return {
       name: meta.name,
       created: entries.length,
-      pending: entries.filter((row) => row.pending).length,
-      abnormal: entries.filter((row) => row.abnormal).length,
-    }
+      // 审计标记与各业务页面共用同一判定：末状态才算闭环，
+      // 应急保障里未解除（待响应/响应中/处置中）都计入待处理。
+      pending,
+      abnormal,
+      mark: abnormal > 0 ? 'abnormal' : pending > 0 ? 'pending' : 'done',
+    } as OverviewResult['modules'][number]
   })
   const cards = [
     { label: '业务模块', value: modules.length },
